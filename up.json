@@ -1,0 +1,5 @@
+{
+  "name": "aws-custom-authorizer",
+  "profile": "default",
+  "regions": ["ap-southeast-2"]
+}
