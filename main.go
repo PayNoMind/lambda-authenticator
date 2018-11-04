@@ -45,12 +45,14 @@ type JSONWebKeys struct {
 }
 
 func main() {
-	lambda.Start(authenticateLambda)
-
 	// Use once https://github.com/apex/up/issues/726 is resolved
-	addr := ":" + os.Getenv("PORT")
-	http.HandleFunc("/", authenticate)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	if os.Getenv("UP_AUTHOR") == "" {
+		addr := ":" + os.Getenv("PORT")
+		http.HandleFunc("/", authenticate)
+		log.Fatal(http.ListenAndServe(addr, nil))
+	} else {
+		lambda.Start(authenticateLambda)
+	}
 }
 
 func getToken(e AWSEvent) string {
@@ -145,8 +147,12 @@ func authenticate(w http.ResponseWriter, r *http.Request) {
 	var event AWSEvent
 
 	b, _ := ioutil.ReadAll(r.Body)
-
 	log.Println("Request is:", string(b))
+
+	if len(b) == 0 {
+		fmt.Fprintln(w, errors.New("Body is Empty"))
+		return
+	}
 
 	if err := json.Unmarshal(b, event); err != nil {
 		fmt.Fprintln(w, err)
