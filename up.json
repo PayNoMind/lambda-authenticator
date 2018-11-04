@@ -1,5 +1,8 @@
 {
   "name": "aws-custom-authorizer",
   "profile": "default",
-  "regions": ["ap-southeast-2"]
+  "regions": ["ap-southeast-2"],
+  "lambda": {
+    "runtime": "go1.x"
+  }
 }

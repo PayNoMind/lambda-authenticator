@@ -132,6 +132,8 @@ func checkToken(tokenString string) (*jwt.Token, error) {
 }
 
 func authenticateLambda(event AWSEvent) (*AWSPolicy, error) {
+	log.Println("Running lambda handler")
+
 	tokenString := getToken(event)
 	token, err := checkToken(tokenString)
 
@@ -154,7 +156,7 @@ func authenticate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := json.Unmarshal(b, event); err != nil {
+	if err := json.Unmarshal(b, &event); err != nil {
 		fmt.Fprintln(w, err)
 	}
 
