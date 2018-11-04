@@ -4,13 +4,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/aws/aws-lambda-go/lambda"
 	jwt "github.com/dgrijalva/jwt-go"
 )
+
+type AWSEvent struct {
+	Type               string `json:"type"`
+	AuthorizationToken string `json:"authorizationToken"`
+	MethodArn          string `json:"methodArn"`
+}
+
+type AWSPolicy struct {
+	Version   string
+	Statement []AWSStatement
+}
+
+type AWSStatement struct {
+	Action   string
+	Effect   string
+	Resource string
+}
 
 type Jwks struct {
 	Keys []JSONWebKeys `json:"keys"`
@@ -26,20 +45,18 @@ type JSONWebKeys struct {
 }
 
 func main() {
-	addr := ":" + getEnv("PORT", "8080")
+	lambda.Start(authenticateLambda)
+
+	// Use once https://github.com/apex/up/issues/726 is resolved
+	addr := ":" + os.Getenv("PORT")
 	http.HandleFunc("/", authenticate)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
-func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return fallback
-}
+func getToken(e AWSEvent) string {
+	log.Println("Event is:", e)
 
-func getToken(header string) string {
-	authHeaderParts := strings.Split(header, " ")
+	authHeaderParts := strings.Split(e.AuthorizationToken, " ")
 	token := authHeaderParts[1]
 	return token
 }
@@ -74,15 +91,13 @@ func getPemCert(token *jwt.Token) (string, error) {
 	return cert, nil
 }
 
-func authenticate(w http.ResponseWriter, r *http.Request) {
-	a := r.Header.Get("Authorization")
-	// sample token string taken from the New example
-	tokenString := getToken(a)
+func getPolicyDocument(effect, resource string) AWSPolicy {
+	s := AWSStatement{Action: "execute-api:Invoke", Effect: effect, Resource: resource}
+	p := AWSPolicy{Version: "2012-10-17", Statement: []AWSStatement{s}}
+	return p
+}
 
-	// Parse takes the token string and a function for looking up the key. The latter is especially
-	// useful if you use multiple keys for your application.  The standard is to use 'kid' in the
-	// head of the token to identify which key to use, but the parsed token (head and claims) is provided
-	// to the callback, providing flexibility.
+func checkToken(tokenString string) (*jwt.Token, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Verify Alg
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
@@ -111,8 +126,39 @@ func authenticate(w http.ResponseWriter, r *http.Request) {
 		return result, nil
 	})
 
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		fmt.Fprintln(w, claims["aud"], claims["iat"], claims["scope"])
+	return token, err
+}
+
+func authenticateLambda(event AWSEvent) (*AWSPolicy, error) {
+	tokenString := getToken(event)
+	token, err := checkToken(tokenString)
+
+	if _, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		p := getPolicyDocument("allow", event.MethodArn)
+		return &p, nil
+	}
+
+	return nil, err
+}
+
+func authenticate(w http.ResponseWriter, r *http.Request) {
+	var event AWSEvent
+
+	b, _ := ioutil.ReadAll(r.Body)
+
+	log.Println("Request is:", string(b))
+
+	if err := json.Unmarshal(b, event); err != nil {
+		fmt.Fprintln(w, err)
+	}
+
+	tokenString := getToken(event)
+	token, err := checkToken(tokenString)
+
+	if _, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		p := getPolicyDocument("allow", event.MethodArn)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(p)
 	} else {
 		fmt.Fprintln(w, err)
 	}
